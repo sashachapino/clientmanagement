@@ -1,0 +1,23 @@
+{
+  "timeZone": "America/New_York",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "gmail": {
+    "name": "Client Check-in Tracker",
+    "logoUrl": "https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_32dp.png",
+    "primaryColor": "#4A90D9",
+    "secondaryColor": "#2C5F8A",
+    "openLinkUrlPrefixes": [],
+    "universalActions": [
+      {
+        "label": "Refresh",
+        "runFunction": "onHomepage"
+      }
+    ],
+    "homepageTrigger": {
+      "runFunction": "onHomepage",
+      "enabled": true
+    }
+  }
+}
