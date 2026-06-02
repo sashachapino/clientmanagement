@@ -21,7 +21,6 @@ function getClientData(now) {
   threads.forEach(function(thread) {
     var msg = thread.getMessages()[0]; // only the original email, not replies
     if (msg.getFrom().toLowerCase().indexOf(me) === -1) return;
-    if (msg.getSubject().toLowerCase().indexOf('session notes') === -1) return;
     var date = msg.getDate();
     parseRecipients(msg.getTo()).forEach(function(r) {
       var key = r.email.toLowerCase();
