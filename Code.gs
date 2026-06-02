@@ -4,11 +4,37 @@ var DAYS_90      = 90  * 24 * 60 * 60 * 1000;
 var DAYS_180     = 180 * 24 * 60 * 60 * 1000;
 var DAYS_365     = 365 * 24 * 60 * 60 * 1000;
 
+var CACHE_KEY     = 'clientData';
+var CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
+
 function onHomepage(e) {
   var now     = new Date();
-  var clients = getClientData(now);
+  var clients = getCachedOrFresh(now);
   var groups  = categorise(clients, now);
   return buildCard(groups);
+}
+
+function getCachedOrFresh(now) {
+  var store = PropertiesService.getUserProperties();
+  var raw   = store.getProperty(CACHE_KEY);
+  if (raw) {
+    var cached = JSON.parse(raw);
+    if (now - new Date(cached.ts) < CACHE_MAX_AGE) {
+      // Deserialise date strings back to Date objects
+      Object.keys(cached.data).forEach(function(k) {
+        cached.data[k].lastDate = new Date(cached.data[k].lastDate);
+      });
+      return cached.data;
+    }
+  }
+  var fresh = getClientData(now);
+  store.setProperty(CACHE_KEY, JSON.stringify({ ts: now.toISOString(), data: fresh }));
+  return fresh;
+}
+
+function refreshCache() {
+  PropertiesService.getUserProperties().deleteProperty(CACHE_KEY);
+  return onHomepage(null);
 }
 
 // ── Data ─────────────────────────────────────────────────────────────────────
@@ -60,8 +86,16 @@ function categorise(clients, now) {
 // ── Card UI ───────────────────────────────────────────────────────────────────
 
 function buildCard(groups) {
+  var refreshAction = CardService.newAction().setFunctionName('refreshCache');
+  var refreshBtn    = CardService.newTextButton()
+    .setText('🔄 Refresh data')
+    .setOnClickAction(refreshAction);
+  var refreshSection = CardService.newCardSection()
+    .addWidget(CardService.newButtonSet().addButton(refreshBtn));
+
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Client Check-in Tracker'))
+    .addSection(refreshSection)
     .addSection(buildSection('✅ Current',        groups.current, 'Within 90 days'))
     .addSection(buildSection('🟡 3 months ago',   groups.ago3mo,  '3–6 months ago'))
     .addSection(buildSection('🟠 6 months ago',   groups.ago6mo,  '6–12 months ago'))
