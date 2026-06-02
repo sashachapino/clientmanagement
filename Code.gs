@@ -1,45 +1,51 @@
-// ── Constants ────────────────────────────────────────────────────────────────
-
 var SEARCH_QUERY = 'from:me subject:"session notes"';
-var MAX_THREADS  = 500;   // how many threads to scan
+var MAX_THREADS  = 500;
 
-var NOW          = new Date();
-var DAYS_90      = 90  * 24 * 60 * 60 * 1000;
-var DAYS_180     = 180 * 24 * 60 * 60 * 1000;
-var DAYS_365     = 365 * 24 * 60 * 60 * 1000;
+var NOW     = new Date();
+var DAYS_90  = 90  * 24 * 60 * 60 * 1000;
+var DAYS_180 = 180 * 24 * 60 * 60 * 1000;
+var DAYS_365 = 365 * 24 * 60 * 60 * 1000;
 
-// ── Entry point ──────────────────────────────────────────────────────────────
+// ── Run this once manually to set up the weekly trigger ──────────────────────
 
-function onHomepage(e) {
-  var clients = getClientData();
-  return buildCard(clients);
+function createWeeklyTrigger() {
+  // Delete any existing triggers first to avoid duplicates
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('sendWeeklyDigest')
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(8)
+    .create();
 }
 
-// ── Data layer ───────────────────────────────────────────────────────────────
+// ── Main ─────────────────────────────────────────────────────────────────────
 
-/**
- * Returns a map of { email → { name, lastDate } } built from sent
- * "session notes" emails.
- */
+function sendWeeklyDigest() {
+  var clients = getClientData();
+  var groups  = categorise(clients);
+  var me      = Session.getEffectiveUser().getEmail();
+  var subject = 'Client check-in digest — ' + formatDate(NOW);
+  var body    = buildEmailBody(groups);
+  GmailApp.sendEmail(me, subject, '', { htmlBody: body });
+}
+
+// ── Data ─────────────────────────────────────────────────────────────────────
+
 function getClientData() {
   var threads = GmailApp.search(SEARCH_QUERY, 0, MAX_THREADS);
-
-  // email → { name: string, lastDate: Date }
   var clients = {};
 
   threads.forEach(function(thread) {
-    var messages = thread.getMessages();
-    messages.forEach(function(msg) {
-      // Only care about messages the user actually sent
+    thread.getMessages().forEach(function(msg) {
       if (!isFromMe(msg)) return;
-
-      var date = msg.getDate();
+      var date       = msg.getDate();
       var recipients = parseRecipients(msg.getTo());
-
       recipients.forEach(function(r) {
         var key = r.email.toLowerCase();
         if (!clients[key] || clients[key].lastDate < date) {
-          clients[key] = { name: r.name || r.email, lastDate: date };
+          clients[key] = { name: r.name, email: r.email, lastDate: date };
         }
       });
     });
@@ -54,121 +60,81 @@ function isFromMe(msg) {
   return from.indexOf(me) !== -1;
 }
 
-/**
- * Parses a To: header string into an array of { name, email }.
- * Handles "First Last <email@example.com>" and bare "email@example.com".
- */
 function parseRecipients(toHeader) {
   if (!toHeader) return [];
-  var results = [];
-  var parts = toHeader.split(',');
-  parts.forEach(function(part) {
+  return toHeader.split(',').reduce(function(acc, part) {
     part = part.trim();
     var match = part.match(/^"?([^"<]*?)"?\s*<([^>]+)>$/);
     if (match) {
-      results.push({ name: match[1].trim() || match[2].trim(), email: match[2].trim() });
+      acc.push({ name: match[1].trim() || match[2].trim(), email: match[2].trim() });
     } else if (part.indexOf('@') !== -1) {
-      results.push({ name: part, email: part });
+      acc.push({ name: part, email: part });
     }
-  });
-  return results;
+    return acc;
+  }, []);
 }
 
-// ── Categorisation ───────────────────────────────────────────────────────────
+// ── Categorise ───────────────────────────────────────────────────────────────
 
 function categorise(clients) {
-  var current   = [];
-  var ago3mo    = [];
-  var ago6mo    = [];
-  var ago1yr    = [];
-  var olderOrNA = [];
+  var groups = { current: [], ago3mo: [], ago6mo: [], ago1yr: [] };
 
-  Object.keys(clients).forEach(function(email) {
-    var c    = clients[email];
+  Object.keys(clients).forEach(function(key) {
+    var c    = clients[key];
     var diff = NOW - c.lastDate;
-
-    if (diff < DAYS_90) {
-      current.push(c);
-    } else if (diff < DAYS_180) {
-      ago3mo.push(c);
-    } else if (diff < DAYS_365) {
-      ago6mo.push(c);
-    } else {
-      ago1yr.push(c);
-    }
+    if      (diff < DAYS_90)  groups.current.push(c);
+    else if (diff < DAYS_180) groups.ago3mo.push(c);
+    else if (diff < DAYS_365) groups.ago6mo.push(c);
+    else                      groups.ago1yr.push(c);
   });
 
-  // Sort each group by name
   var byName = function(a, b) { return a.name.localeCompare(b.name); };
-  current.sort(byName);
-  ago3mo.sort(byName);
-  ago6mo.sort(byName);
-  ago1yr.sort(byName);
-
-  return { current: current, ago3mo: ago3mo, ago6mo: ago6mo, ago1yr: ago1yr };
+  Object.keys(groups).forEach(function(k) { groups[k].sort(byName); });
+  return groups;
 }
 
-// ── Card UI ──────────────────────────────────────────────────────────────────
+// ── Email builder ─────────────────────────────────────────────────────────────
 
-function buildCard(clients) {
-  var groups = categorise(clients);
-  var card   = CardService.newCardBuilder()
-    .setName('Client Check-in Tracker')
-    .setHeader(
-      CardService.newCardHeader()
-        .setTitle('Client Check-in Tracker')
-        .setSubtitle('Based on your "session notes" emails')
-    );
+function buildEmailBody(groups) {
+  var html = '<div style="font-family:sans-serif;max-width:600px;margin:0 auto;color:#222">';
+  html += '<h2 style="border-bottom:2px solid #eee;padding-bottom:8px">Client check-in digest</h2>';
 
-  card.addSection(buildSection(
-    '✅  Current clients  (' + groups.current.length + ')',
-    groups.current,
-    'Last session within 90 days'
-  ));
+  html += section('✅ Current clients',        groups.current, 'Last session within 90 days',    '#d4edda', '#155724');
+  html += section('🟡 Check in — 3 months',   groups.ago3mo,  'Last session 3–6 months ago',    '#fff3cd', '#856404');
+  html += section('🟠 Check in — 6 months',   groups.ago6mo,  'Last session 6–12 months ago',   '#ffe5cc', '#7d3c00');
+  html += section('🔴 Check in — 1 year+',    groups.ago1yr,  'Last session over a year ago',   '#f8d7da', '#721c24');
 
-  card.addSection(buildSection(
-    '🟡  Check in — 3 months  (' + groups.ago3mo.length + ')',
-    groups.ago3mo,
-    'Last session 3–6 months ago'
-  ));
-
-  card.addSection(buildSection(
-    '🟠  Check in — 6 months  (' + groups.ago6mo.length + ')',
-    groups.ago6mo,
-    'Last session 6–12 months ago'
-  ));
-
-  card.addSection(buildSection(
-    '🔴  Check in — 1 year+  (' + groups.ago1yr.length + ')',
-    groups.ago1yr,
-    'Last session over a year ago'
-  ));
-
-  return card.build();
+  html += '<p style="color:#999;font-size:12px;margin-top:32px">Generated from emails matching: <code>from:me subject:"session notes"</code></p>';
+  html += '</div>';
+  return html;
 }
 
-function buildSection(header, clients, subtitle) {
-  var section = CardService.newCardSection()
-    .setHeader(header)
-    .setCollapsible(true)
-    .setNumUncollapsibleWidgets(0);
+function section(title, clients, subtitle, bg, color) {
+  var html = '<div style="margin-bottom:24px">';
+  html += '<h3 style="background:' + bg + ';color:' + color + ';padding:8px 12px;border-radius:4px;margin:0 0 4px">' + title + '</h3>';
+  html += '<p style="margin:0 0 8px;font-size:13px;color:#666">' + subtitle + '</p>';
 
   if (clients.length === 0) {
-    section.addWidget(
-      CardService.newTextParagraph().setText('<i>None</i>')
-    );
-    return section;
+    html += '<p style="color:#999;font-style:italic">None</p>';
+  } else {
+    html += '<table style="width:100%;border-collapse:collapse">';
+    clients.forEach(function(c) {
+      html += '<tr style="border-bottom:1px solid #eee">';
+      html += '<td style="padding:6px 4px">' + escHtml(c.name) + '</td>';
+      html += '<td style="padding:6px 4px;color:#666;text-align:right;font-size:13px">' + formatDate(c.lastDate) + '</td>';
+      html += '</tr>';
+    });
+    html += '</table>';
   }
 
-  clients.forEach(function(c) {
-    var lastSeen = Utilities.formatDate(c.lastDate, Session.getScriptTimeZone(), 'MMM d, yyyy');
-    section.addWidget(
-      CardService.newKeyValue()
-        .setTopLabel(c.name)
-        .setContent(lastSeen)
-        .setMultiline(false)
-    );
-  });
+  html += '</div>';
+  return html;
+}
 
-  return section;
+function formatDate(d) {
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MMM d, yyyy');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
