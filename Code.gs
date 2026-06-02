@@ -19,15 +19,14 @@ function getClientData(now) {
   var me      = Session.getEffectiveUser().getEmail().toLowerCase();
 
   threads.forEach(function(thread) {
-    thread.getMessages().forEach(function(msg) {
-      if (msg.getFrom().toLowerCase().indexOf(me) === -1) return;
-      if (msg.getSubject().toLowerCase().indexOf('session notes') === -1) return;
-      var date = msg.getDate();
-      parseRecipients(msg.getTo()).forEach(function(r) {
-        var key = r.email.toLowerCase();
-        if (!clients[key] || clients[key].lastDate < date)
-          clients[key] = { name: r.name, lastDate: date };
-      });
+    var msg = thread.getMessages()[0]; // only the original email, not replies
+    if (msg.getFrom().toLowerCase().indexOf(me) === -1) return;
+    if (msg.getSubject().toLowerCase().indexOf('session notes') === -1) return;
+    var date = msg.getDate();
+    parseRecipients(msg.getTo()).forEach(function(r) {
+      var key = r.email.toLowerCase();
+      if (!clients[key] || clients[key].lastDate < date)
+        clients[key] = { name: r.name, lastDate: date };
     });
   });
 
