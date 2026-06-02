@@ -3,18 +3,8 @@
   "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
-  "oauthScopes": [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/script.locale"
-  ],
-  "addOns": {
-    "common": {
-      "name": "Client Check-in Tracker",
-      "logoUrl": "https://www.gstatic.com/images/branding/product/1x/gmail_2020q4_32dp.png",
-      "homepageTrigger": {
-        "runFunction": "onHomepage"
-      }
-    },
-    "gmail": {}
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "MYSELF"
   }
 }
