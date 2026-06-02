@@ -1,5 +1,5 @@
-var SEARCH_QUERY = 'from:me subject:"session notes"';
-var MAX_THREADS  = 500;
+var SEARCH_QUERY = 'from:me subject:"session notes" newer_than:2y';
+var MAX_THREADS  = 100;
 var DAYS_90      = 90  * 24 * 60 * 60 * 1000;
 var DAYS_180     = 180 * 24 * 60 * 60 * 1000;
 var DAYS_365     = 365 * 24 * 60 * 60 * 1000;
