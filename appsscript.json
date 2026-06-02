@@ -6,7 +6,8 @@
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.addons.execute",
     "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/script.locale"
+    "https://www.googleapis.com/auth/script.locale",
+    "https://www.googleapis.com/auth/script.storage"
   ],
   "addOns": {
     "common": {
