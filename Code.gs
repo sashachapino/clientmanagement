@@ -1,51 +1,43 @@
-var SEARCH_QUERY = 'from:me subject:"session notes" newer_than:2y';
-var MAX_THREADS  = 100;
-var DAYS_90      = 90  * 24 * 60 * 60 * 1000;
-var DAYS_180     = 180 * 24 * 60 * 60 * 1000;
-var DAYS_365     = 365 * 24 * 60 * 60 * 1000;
-
+var SEARCH_QUERY  = 'from:me subject:"session notes"';
+var MAX_THREADS   = 500;
 var CACHE_KEY     = 'clientData';
-var CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
+var DAYS_90       = 90  * 24 * 60 * 60 * 1000;
+var DAYS_180      = 180 * 24 * 60 * 60 * 1000;
+var DAYS_365      = 365 * 24 * 60 * 60 * 1000;
+
+// ── Add-on entry point (reads cache only — instant) ───────────────────────────
 
 function onHomepage(e) {
-  var now     = new Date();
-  var clients = getCachedOrFresh(now);
-  var groups  = categorise(clients, now);
-  return buildCard(groups);
-}
+  var now    = new Date();
+  var store  = PropertiesService.getUserProperties();
+  var raw    = store.getProperty(CACHE_KEY);
 
-function getCachedOrFresh(now) {
-  var store = PropertiesService.getUserProperties();
-  var raw   = store.getProperty(CACHE_KEY);
-  if (raw) {
-    var cached = JSON.parse(raw);
-    if (now - new Date(cached.ts) < CACHE_MAX_AGE) {
-      // Deserialise date strings back to Date objects
-      Object.keys(cached.data).forEach(function(k) {
-        cached.data[k].lastDate = new Date(cached.data[k].lastDate);
-      });
-      return cached.data;
-    }
+  if (!raw) {
+    // No cache yet — run the scan now (slow, one-time)
+    buildCache();
+    raw = store.getProperty(CACHE_KEY);
   }
-  var fresh = getClientData(now);
-  store.setProperty(CACHE_KEY, JSON.stringify({ ts: now.toISOString(), data: fresh }));
-  return fresh;
+
+  var cached = JSON.parse(raw);
+  var clients = cached.data;
+  Object.keys(clients).forEach(function(k) {
+    clients[k].lastDate = new Date(clients[k].lastDate);
+  });
+
+  var groups  = categorise(clients, now);
+  var updated = new Date(cached.ts);
+  return buildCard(groups, updated);
 }
 
-function refreshCache() {
-  PropertiesService.getUserProperties().deleteProperty(CACHE_KEY);
-  return onHomepage(null);
-}
+// ── Cache builder — called by daily trigger or Refresh button ─────────────────
 
-// ── Data ─────────────────────────────────────────────────────────────────────
-
-function getClientData(now) {
+function buildCache() {
   var threads = GmailApp.search(SEARCH_QUERY, 0, MAX_THREADS);
   var clients = {};
   var me      = Session.getEffectiveUser().getEmail().toLowerCase();
 
   threads.forEach(function(thread) {
-    var msg = thread.getMessages()[0]; // only the original email, not replies
+    var msg = thread.getMessages()[0];
     if (msg.getFrom().toLowerCase().indexOf(me) === -1) return;
     var date = msg.getDate();
     parseRecipients(msg.getTo()).forEach(function(r) {
@@ -55,8 +47,25 @@ function getClientData(now) {
     });
   });
 
-  return clients;
+  PropertiesService.getUserProperties().setProperty(
+    CACHE_KEY,
+    JSON.stringify({ ts: new Date().toISOString(), data: clients })
+  );
 }
+
+function refreshAndShow() {
+  buildCache();
+  return onHomepage(null);
+}
+
+// ── Run once to create the daily trigger ─────────────────────────────────────
+
+function createDailyTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('buildCache').timeBased().everyDays(1).atHour(6).create();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseRecipients(toHeader) {
   if (!toHeader) return [];
@@ -85,21 +94,23 @@ function categorise(clients, now) {
 
 // ── Card UI ───────────────────────────────────────────────────────────────────
 
-function buildCard(groups) {
-  var refreshAction = CardService.newAction().setFunctionName('refreshCache');
+function buildCard(groups, updatedAt) {
+  var refreshAction = CardService.newAction().setFunctionName('refreshAndShow');
   var refreshBtn    = CardService.newTextButton()
-    .setText('🔄 Refresh data')
+    .setText('🔄 Refresh')
     .setOnClickAction(refreshAction);
-  var refreshSection = CardService.newCardSection()
+  var subtitle = 'Updated ' + Utilities.formatDate(updatedAt, Session.getScriptTimeZone(), 'MMM d h:mm a');
+  var topSection = CardService.newCardSection()
+    .addWidget(CardService.newTextParagraph().setText('<font color="#999999">' + subtitle + '</font>'))
     .addWidget(CardService.newButtonSet().addButton(refreshBtn));
 
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Client Check-in Tracker'))
-    .addSection(refreshSection)
-    .addSection(buildSection('✅ Current',        groups.current, 'Within 90 days'))
-    .addSection(buildSection('🟡 3 months ago',   groups.ago3mo,  '3–6 months ago'))
-    .addSection(buildSection('🟠 6 months ago',   groups.ago6mo,  '6–12 months ago'))
-    .addSection(buildSection('🔴 1 year+',        groups.ago1yr,  'Over a year ago'))
+    .addSection(topSection)
+    .addSection(buildSection('✅ Current',       groups.current, 'Within 90 days'))
+    .addSection(buildSection('🟡 3 months ago',  groups.ago3mo,  '3–6 months ago'))
+    .addSection(buildSection('🟠 6 months ago',  groups.ago6mo,  '6–12 months ago'))
+    .addSection(buildSection('🔴 1 year+',       groups.ago1yr,  'Over a year ago'))
     .build();
 }
 
